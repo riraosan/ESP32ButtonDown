@@ -1,2 +1,18 @@
-# ESP32ButtonDown
-ESP32 + Servo +ThingSpeak = pressing a button on something.
+
+# ESP32 Button Down Application Sample
+
+
+## サーボ固定用アングルのサンプル
+
+### DAISO
+
+ステンレス取付金具　100mm（2個）
+
+ステンレス金折隅金 50mm×50mm（2個）
+
+### コーナンプロ
+
+M5 ナット
+M5　蝶ネジ
+M5　ネジ
+M5　ゴムワッシャ
