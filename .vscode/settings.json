@@ -36,4 +36,9 @@
       "editor.wordWrap": "off",
       "files.trimTrailingWhitespace": false,
     },
+    "files.associations": {
+      "*.tcc": "cpp",
+      "functional": "cpp",
+      "tuple": "cpp"
+    },
 }

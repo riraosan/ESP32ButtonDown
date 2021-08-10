@@ -1,5 +1,5 @@
 
-# ESP32 Button Down Application Sample
+# ESP32 Push Down Application Sample for M5StickC Plus
 
 
 ## サーボ固定用アングルのサンプル
