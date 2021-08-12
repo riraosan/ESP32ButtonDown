@@ -10,13 +10,13 @@
 #include <ESP32Servo.h>
 #include <SimpleCLI.h>
 #include <ThingSpeak.h>
-#include <esp32-hal-log.h>
-#include <secrets.h>
-
 #include <Wire.h>
 #include <SPI.h>
 #include <M5Display.h>
 #include <AXP192.h>
+#include <esp32-hal-log.h>
+#include <secrets.h>
+#include <ESP32SharpIR.h>
 
 enum class MESSAGE : int {
     _DO_NOTHING,
@@ -195,22 +195,22 @@ class Application {
         }
     }
 
-    void begin(uint32_t servoNum, uint32_t buttonNum) {
-        Serial.begin(115200);
+    void initPSD(void) {
+        pinMode(PSD_PORT, INPUT);
+        gpio_pulldown_dis(GPIO_NUM_25);
+        gpio_pullup_dis(GPIO_NUM_25);
 
-        Lcd.begin();
-        Axp.begin();
+        // Setting the filter resolution to 0.1
+        _sensor.setFilterRate(0.1f);
+    }
 
-        Axp.EnableCoulombcounter();  //Turn on 5V output
-
-        initWiFi();
-        initESPUI();
-
-        //init servo
+    void initServo(uint32_t servoNum) {
         pinMode(servoNum, OUTPUT);
         _servo.attach(servoNum);
         _servo.write(_init_angle);
+    }
 
+    void initButton(uint32_t buttonNum) {
         //init button
         _button.setClickHandler(handler);
         _button.setLongClickHandler(handler);
@@ -218,7 +218,9 @@ class Application {
         _button.setTripleClickHandler(handler);
 
         _button.begin(buttonNum);
+    }
 
+    void initCLI(void) {
         //init CLI
         _cli.setOnError(errorCallback);
         _tool = _cli.addSingleArgCmd("tool", toolCallback);
@@ -229,6 +231,32 @@ class Application {
 
         Serial.println("Type: tool on, timer -start {{count}}, timer -stop");
         Serial.print("$ ");
+    }
+
+    void initM5StickCPlus(void) {
+        Lcd.begin();
+        Axp.begin();
+        Axp.EnableCoulombcounter();  //Turn on 5V output
+
+        Lcd.setRotation(0);  // Landscape (Portrait + 90)
+        Lcd.setCursor(0, 0);
+        Lcd.fillScreen(TFT_BLACK);
+        Lcd.setTextSize(2);
+        Lcd.setTextColor(TFT_GREEN, TFT_BLACK);
+        Lcd.printEfont("PowerON!");
+    }
+
+    void detection(void) {
+        float dist = _sensor.getDistanceFloat();
+        String value(dist);
+        value.concat("cm ");
+        Lcd.setCursor(0, 32);
+        Lcd.setTextColor(TFT_WHITE, TFT_BLACK);
+        Lcd.printEfont(value.c_str());
+
+        if (dist < 11.0f) {
+            _message = MESSAGE::_ONCE_EVENT;
+        }
     }
 
     void servoOn(void) {
@@ -242,6 +270,18 @@ class Application {
         Serial.printf("\x1b[31m%d\x1b[0m\n", _total_count + 1);
         Serial.print("$ ");
         _total_count++;
+    }
+
+    void begin(uint32_t servoNum, uint32_t buttonNum) {
+        Serial.begin(115200);
+
+        initM5StickCPlus();
+        initWiFi();
+        initESPUI();
+        initPSD();
+        initServo(servoNum);
+        initButton(buttonNum);
+        initCLI();
     }
 
     void update(void) {
@@ -274,6 +314,12 @@ class Application {
                 }
                 break;
             case MESSAGE::_ONCE_EVENT:
+                servoOn();
+                printCount();
+                delay(_period);
+
+                _message = MESSAGE::_DO_NOTHING;
+                break;
             case MESSAGE::_ENDLESS_TIMER:
                 servoOn();
                 printCount();
@@ -303,6 +349,7 @@ class Application {
                 _message = MESSAGE::_DO_NOTHING;
                 break;
             default:
+                detection();
                 break;
         }
 
@@ -331,6 +378,9 @@ class Application {
     uint16_t _periodID;
     uint16_t _initAngleID;
     uint16_t _pushAngleID;
+    static constexpr uint32_t PSD_PORT = 36;
+
+    ESP32SharpIR _sensor = ESP32SharpIR(ESP32SharpIR::GP2Y0A21YK0F, PSD_PORT);
 };
 
 MESSAGE Application::_message     = MESSAGE::_DO_NOTHING;

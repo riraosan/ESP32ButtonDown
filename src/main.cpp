@@ -2,6 +2,7 @@
 
 #define SERVO_PORT  26
 #define BUTTON_PORT 37
+#define PSD_PORT    36
 
 static Application app;
 
