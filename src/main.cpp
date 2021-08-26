@@ -7,7 +7,7 @@
 static Application app;
 
 void setup(void) {
-    app.begin(SERVO_PORT, BUTTON_PORT);
+    app.begin(SERVO_PORT, BUTTON_PORT, PSD_PORT);
 }
 
 void loop(void) {

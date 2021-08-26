@@ -1,6 +1,8 @@
 
 #define TS_ENABLE_SSL
 #include <Arduino.h>
+#include <EEPROM.h>
+#include <StreamUtils.h>
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <ESPmDNS.h>
@@ -29,7 +31,8 @@ enum class MESSAGE : int {
     _LIMITED_TIMER,
     _ENDLESS_TIMER,
     _CHECK_INIT_ANGLE,
-    _CHECK_PUSH_ANGLE
+    _CHECK_PUSH_ANGLE,
+    _SAVE_SETTING,
 };
 
 class Application {
@@ -136,11 +139,15 @@ class Application {
     static void inputPushDownAngle(Control* sender, int value) {
         //log_d("Select: ID: %d Value: %s", sender->id, sender->value);
         _push_angle = _init_angle + sender->value.toInt();
-        _message    = MESSAGE::_CHECK_PUSH_ANGLE;
     }
 
-    static void buttonStart(Control* sender, int value) {
+    static void saveButton(Control* sender, int value) {
         //log_d("Select: ID: %d Value: %s", sender->id, sender->value);
+        _message = MESSAGE::_SAVE_SETTING;
+    }
+
+    void initEEPROM(void) {
+        EEPROM.begin(256 * 3);
     }
 
     void initESPUI(void) {
@@ -155,21 +162,59 @@ class Application {
         ESPUI.addControl(ControlType::Label, "ESP32 IP Address", WiFi.localIP().toString(), ControlColor::Sunflower, tabInfo);
 
         //Push Down Settings
-        _periodID    = ESPUI.number("Period", inputPeriod, ControlColor::Alizarin, 1, 1, 10);
-        _initAngleID = ESPUI.slider("Init angle", inputInitAngle, ControlColor::Alizarin, 10, 0, 180);
-        _pushAngleID = ESPUI.slider("Push Down angle", inputPushDownAngle, ControlColor::Alizarin, 60, 0, 180);
-        //ESPUI.addControl(UI_BUTTON, "Start", "Start", COLOR_EMERALD, tabSetting, buttonStart);
+        _periodID    = ESPUI.number("Period", inputPeriod, ControlColor::Alizarin, _period, 1, 10);
+        _initAngleID = ESPUI.slider("Init angle", inputInitAngle, ControlColor::Alizarin, _init_angle, 0, 180);
+        _pushAngleID = ESPUI.slider("Push Down angle", inputPushDownAngle, ControlColor::Alizarin, _push_angle, 0, 180);
+        ESPUI.addControl(ControlType::Button, "Save", "Save", ControlColor::Alizarin, tabSetting, saveButton);
 
-        ESPUI.getControl(_periodID)->parentControl    = tabSetting;
-        ESPUI.getControl(_initAngleID)->parentControl = tabSetting;
-        ESPUI.getControl(_pushAngleID)->parentControl = tabSetting;
+        _inPeriod    = ESPUI.getControl(_periodID);
+        _inInitAngle = ESPUI.getControl(_initAngleID);
+        _inPushAngle = ESPUI.getControl(_pushAngleID);
+
+        loadControlValue(256 * 0, _inPeriod);
+        loadControlValue(256 * 1, _inInitAngle);
+        loadControlValue(256 * 2, _inPushAngle);
+
+        _inPeriod->parentControl    = tabSetting;
+        _inInitAngle->parentControl = tabSetting;
+        _inPushAngle->parentControl = tabSetting;
 
         ESPUI.begin("ESP32 Push Down");
 
-        _period     = ESPUI.getControl(_periodID)->value.toInt() * 1000;
-        _init_angle = ESPUI.getControl(_initAngleID)->value.toInt();
-        _push_angle = ESPUI.getControl(_pushAngleID)->value.toInt() + _init_angle;
         _interval   = _period / 2;
+    }
+
+    void saveControlValue(size_t address, Control* control) {
+        if (!control) {
+            return;
+        }
+
+        DynamicJsonDocument doc(256);
+        EepromStream eeprom(address, 256);
+
+        //doc["type"]  = (int)control->type;
+        doc["value"] = control->value;
+        //doc["id"]    = control->id;
+        //doc["color"] = (int)control->color;
+
+        serializeJson(doc, eeprom);
+        eeprom.flush();
+    }
+
+    void loadControlValue(size_t address, Control* control) {
+        if (!control) {
+            return;
+        }
+
+        DynamicJsonDocument doc(256);
+        EepromStream eeprom(address, 256);
+
+        deserializeJson(doc, eeprom);
+
+        //control->type  = doc["type"];
+        control->value = (const char*)doc["value"];
+        //control->id    = doc["id"];
+        //control->color = doc["color"];
     }
 
     void initWiFi(void) {
@@ -195,13 +240,15 @@ class Application {
         }
     }
 
-    void initPSD(void) {
-        pinMode(PSD_PORT, INPUT);
+    void initPSD(uint32_t psdPort) {
+        pinMode(psdPort, INPUT);
         gpio_pulldown_dis(GPIO_NUM_25);
         gpio_pullup_dis(GPIO_NUM_25);
 
+        _sensor = new ESP32SharpIR(ESP32SharpIR::GP2Y0A21YK0F, psdPort);
+
         // Setting the filter resolution to 0.1
-        _sensor.setFilterRate(0.1f);
+        _sensor->setFilterRate(0.1f);
     }
 
     void initServo(uint32_t servoNum) {
@@ -229,7 +276,7 @@ class Application {
         _continue.addArgument("start", "0");
         _continue.addFlagArgument("stop");
 
-        Serial.println("Type: tool on, timer -start {{count}}, timer -stop");
+        Serial.println("Type: tool on, timer -start {count}, timer -stop");
         Serial.print("$ ");
     }
 
@@ -247,7 +294,7 @@ class Application {
     }
 
     void detection(void) {
-        float dist = _sensor.getDistanceFloat();
+        float dist = _sensor->getDistanceFloat();
         String value(dist);
         value.concat("cm ");
         Lcd.setCursor(0, 32);
@@ -272,15 +319,16 @@ class Application {
         _total_count++;
     }
 
-    void begin(uint32_t servoNum, uint32_t buttonNum) {
+    void begin(uint32_t servoPort, uint32_t buttonPort, uint32_t psdPort) {
         Serial.begin(115200);
 
         initM5StickCPlus();
         initWiFi();
+        initEEPROM();
         initESPUI();
-        initPSD();
-        initServo(servoNum);
-        initButton(buttonNum);
+        initPSD(psdPort);
+        initServo(servoPort);
+        initButton(buttonPort);
         initCLI();
     }
 
@@ -348,8 +396,13 @@ class Application {
                 _servo.write(_push_angle);
                 _message = MESSAGE::_DO_NOTHING;
                 break;
+            case MESSAGE::_SAVE_SETTING:
+                saveControlValue(256 * 0, _inPeriod);
+                saveControlValue(256 * 1, _inInitAngle);
+                saveControlValue(250 * 2, _inPushAngle);
+                break;
             default:
-                detection();
+                //detection();
                 break;
         }
 
@@ -357,8 +410,6 @@ class Application {
             _cli.parse(Serial.readStringUntil('\n'));
             Serial.print("$ ");
         }
-
-        yield();
     }
 
    private:
@@ -378,9 +429,12 @@ class Application {
     uint16_t _periodID;
     uint16_t _initAngleID;
     uint16_t _pushAngleID;
-    static constexpr uint32_t PSD_PORT = 36;
 
-    ESP32SharpIR _sensor = ESP32SharpIR(ESP32SharpIR::GP2Y0A21YK0F, PSD_PORT);
+    ESP32SharpIR* _sensor;
+
+    Control* _inPeriod;
+    Control* _inInitAngle;
+    Control* _inPushAngle;
 };
 
 MESSAGE Application::_message     = MESSAGE::_DO_NOTHING;
