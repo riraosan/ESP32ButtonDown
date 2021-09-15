@@ -126,28 +126,45 @@ class Application {
     }
 
     static void inputPeriod(Control* sender, int value) {
-        //log_d("Select: ID: %d Value: %s", sender->id, sender->value);
         _period = sender->value.toInt() * 1000;
     }
 
     static void inputInitAngle(Control* sender, int value) {
-        //log_d("Select: ID: %d Value: %s", sender->id, sender->value);
         _init_angle = sender->value.toInt();
         _message    = MESSAGE::_CHECK_INIT_ANGLE;
     }
 
     static void inputPushDownAngle(Control* sender, int value) {
-        //log_d("Select: ID: %d Value: %s", sender->id, sender->value);
-        _push_angle = _init_angle + sender->value.toInt();
+        _push_angle = sender->value.toInt();
     }
 
     static void saveButton(Control* sender, int value) {
-        //log_d("Select: ID: %d Value: %s", sender->id, sender->value);
         _message = MESSAGE::_SAVE_SETTING;
     }
 
     void initEEPROM(void) {
         EEPROM.begin(256 * 3);
+    }
+
+    void loadSetting(void) {
+        loadControlValue(256 * 0, _inPeriod);
+        loadControlValue(256 * 1, _inInitAngle);
+        loadControlValue(256 * 2, _inPushAngle);
+
+        _period     = _inPeriod->value.toInt() * 1000;
+        _init_angle = _inInitAngle->value.toInt();
+        _push_angle = _inPushAngle->value.toInt();
+        _interval   = _period / 2;
+
+        log_d("Period = %d ms, init angle = %d degree, push angle = %d degree \n", _period, _init_angle, _push_angle);
+    }
+
+    void saveSetting(void) {
+        saveControlValue(256 * 0, _inPeriod);
+        saveControlValue(256 * 1, _inInitAngle);
+        saveControlValue(256 * 2, _inPushAngle);
+
+        log_d("Period = %d ms, init angle = %d degree, push angle = %d degree \n", _period, _init_angle, _push_angle);
     }
 
     void initESPUI(void) {
@@ -162,26 +179,26 @@ class Application {
         ESPUI.addControl(ControlType::Label, "ESP32 IP Address", WiFi.localIP().toString(), ControlColor::Sunflower, tabInfo);
 
         //Push Down Settings
-        _periodID    = ESPUI.number("Period", inputPeriod, ControlColor::Alizarin, _period, 1, 10);
-        _initAngleID = ESPUI.slider("Init angle", inputInitAngle, ControlColor::Alizarin, _init_angle, 0, 180);
-        _pushAngleID = ESPUI.slider("Push Down angle", inputPushDownAngle, ControlColor::Alizarin, _push_angle, 0, 180);
+        _periodID    = ESPUI.number("Period", inputPeriod, ControlColor::Alizarin, 0, 1, 10);
+        _initAngleID = ESPUI.slider("Init angle", inputInitAngle, ControlColor::Alizarin, 0, 0, 180);
+        _pushAngleID = ESPUI.slider("Push Down angle", inputPushDownAngle, ControlColor::Alizarin, 0, 0, 180);
         ESPUI.addControl(ControlType::Button, "Save", "Save", ControlColor::Alizarin, tabSetting, saveButton);
 
         _inPeriod    = ESPUI.getControl(_periodID);
         _inInitAngle = ESPUI.getControl(_initAngleID);
         _inPushAngle = ESPUI.getControl(_pushAngleID);
 
-        loadControlValue(256 * 0, _inPeriod);
-        loadControlValue(256 * 1, _inInitAngle);
-        loadControlValue(256 * 2, _inPushAngle);
-
         _inPeriod->parentControl    = tabSetting;
         _inInitAngle->parentControl = tabSetting;
         _inPushAngle->parentControl = tabSetting;
 
+        loadSetting();
+
         ESPUI.begin("ESP32 Push Down");
 
-        _interval   = _period / 2;
+        ESPUI.updateControl(_periodID);
+        ESPUI.updateControl(_initAngleID);
+        ESPUI.updateControl(_pushAngleID);
     }
 
     void saveControlValue(size_t address, Control* control) {
@@ -192,10 +209,7 @@ class Application {
         DynamicJsonDocument doc(256);
         EepromStream eeprom(address, 256);
 
-        //doc["type"]  = (int)control->type;
         doc["value"] = control->value;
-        //doc["id"]    = control->id;
-        //doc["color"] = (int)control->color;
 
         serializeJson(doc, eeprom);
         eeprom.flush();
@@ -211,10 +225,7 @@ class Application {
 
         deserializeJson(doc, eeprom);
 
-        //control->type  = doc["type"];
         control->value = (const char*)doc["value"];
-        //control->id    = doc["id"];
-        //control->color = doc["color"];
     }
 
     void initWiFi(void) {
@@ -311,6 +322,7 @@ class Application {
         _servo.write(_push_angle);  //ON
         delay(_interval);           //interval
         _servo.write(_init_angle);  //OFF
+        log_d("%d %d %d %d ", _period, _init_angle, _push_angle, _interval);
     }
 
     void printCount(void) {
@@ -397,12 +409,11 @@ class Application {
                 _message = MESSAGE::_DO_NOTHING;
                 break;
             case MESSAGE::_SAVE_SETTING:
-                saveControlValue(256 * 0, _inPeriod);
-                saveControlValue(256 * 1, _inInitAngle);
-                saveControlValue(250 * 2, _inPushAngle);
+                saveSetting();
+                _message = MESSAGE::_DO_NOTHING;
                 break;
             default:
-                //detection();
+                detection();
                 break;
         }
 
